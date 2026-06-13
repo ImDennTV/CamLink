@@ -21,7 +21,7 @@ python build\make_icon.py
 
 Write-Host "[3/4] Build eseguibile (PyInstaller)..." -ForegroundColor Cyan
 python -m PyInstaller `
-  --noconfirm --clean --windowed `
+  --noconfirm --clean --windowed --noupx `
   --name CamLink `
   --icon "$root\assets\icon.ico" `
   --distpath build\dist --workpath build\work --specpath build `
@@ -35,6 +35,19 @@ python -m PyInstaller `
   --collect-submodules cryptography `
   --hidden-import qrcode.image.svg `
   --hidden-import PIL._tkinter_finder `
+  --exclude-module tkinter `
+  --exclude-module unittest `
+  --exclude-module pdb `
+  --exclude-module difflib `
+  --exclude-module doctest `
+  --exclude-module ftplib `
+  --exclude-module imaplib `
+  --exclude-module mailbox `
+  --exclude-module nntplib `
+  --exclude-module poplib `
+  --exclude-module smtplib `
+  --exclude-module telnetlib `
+  --exclude-module xmlrpc `
   server.py
 
 if (-not (Test-Path "build\dist\CamLink\CamLink.exe")) {
