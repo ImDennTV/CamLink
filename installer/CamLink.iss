@@ -33,6 +33,8 @@ Compression=lzma2
 SolidCompression=yes
 PrivilegesRequired=admin
 ArchitecturesInstallIn64BitMode=x64compatible
+CloseApplications=yes
+RestartApplications=no
 
 [Languages]
 Name: "it"; MessagesFile: "compiler:Languages\Italian.isl"
@@ -59,6 +61,16 @@ Filename: "{app}\{#AppExe}"; Description: "Avvia {#AppName}"; Flags: nowait post
 
 [UninstallRun]
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""CamLink"""; Flags: runhidden; RunOnceId: "DelFwRule"
+
+[Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Exec('taskkill.exe', '/F /IM CamLink.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(1200);
+  Result := '';
+end;
 
 [UninstallDelete]
 ; rimuove i dati locali (certificato)
