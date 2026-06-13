@@ -1,0 +1,106 @@
+/* ── CamLink · host dashboard ─────────────────────────────────────────────── */
+
+:root {
+  --bg: #0a0a0f;
+  --accent: #5b8def;
+  --grad: linear-gradient(135deg, #5b8def, #845cf6);
+  --live: #22c55e;
+  --warn: #f5a623;
+  --surface: #15161d;
+  --surface-2: #1d1e27;
+  --line: rgba(255,255,255,.08);
+  --text: #f5f6f8;
+  --dim: #9092a0;
+}
+
+* , *::before, *::after { margin: 0; padding: 0; box-sizing: border-box }
+
+body {
+  min-height: 100vh; display: grid; place-items: center; padding: 28px;
+  background: radial-gradient(120% 90% at 50% -10%, #161822 0%, #0a0a0f 60%);
+  color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.icon { width: 24px; height: 24px; fill: none; stroke: currentColor;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; display: block }
+
+.card {
+  width: 100%; max-width: 560px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 24px;
+  padding: 30px; box-shadow: 0 30px 80px rgba(0,0,0,.5);
+}
+
+.head { display: flex; align-items: center; gap: 15px; margin-bottom: 26px }
+.logo {
+  width: 56px; height: 56px; border-radius: 16px; background: var(--grad);
+  display: grid; place-items: center; box-shadow: 0 10px 28px rgba(91,141,239,.4);
+}
+.logo .icon { width: 30px; height: 30px; stroke: #fff; stroke-width: 1.8 }
+.head h1 { font-size: 24px; font-weight: 750; letter-spacing: -.4px }
+.sub { color: var(--dim); font-size: 14px; margin-top: 2px }
+
+.qrwrap { display: flex; gap: 22px; align-items: center; margin-bottom: 24px }
+@media (max-width: 480px) { .qrwrap { flex-direction: column; text-align: center } }
+
+.qrbox { background: #fff; border-radius: 18px; padding: 12px; flex: none; line-height: 0 }
+.qrbox img { width: 168px; height: 168px; display: block }
+
+.qrside { flex: 1; min-width: 0 }
+.step-label { font-size: 14px; font-weight: 600; margin-bottom: 4px }
+.muted { font-size: 13px; color: var(--dim); line-height: 1.5 }
+
+.urlchip {
+  display: inline-block; margin-top: 8px; max-width: 100%;
+  background: var(--surface-2); border: 1px solid var(--line); color: var(--accent);
+  border-radius: 10px; padding: 9px 14px; font-size: 14px; font-family: ui-monospace, monospace;
+  cursor: pointer; transition: background .2s; word-break: break-all;
+}
+.urlchip:hover { background: #25262f }
+
+.status {
+  display: flex; align-items: center; gap: 11px;
+  background: var(--surface-2); border-radius: 14px; padding: 15px 18px; font-size: 15px;
+}
+.status .dot { width: 11px; height: 11px; border-radius: 50%; flex: none; transition: background .3s }
+.status.waiting   .dot { background: var(--dim) }
+.status.connected .dot { background: var(--live); box-shadow: 0 0 10px var(--live); animation: pulse 2s infinite }
+@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
+.status .meta { margin-left: auto; color: var(--dim); font-size: 13px; font-variant-numeric: tabular-nums }
+
+.warn {
+  display: flex; gap: 13px; align-items: flex-start; margin-top: 14px;
+  background: rgba(245,166,35,.1); border: 1px solid rgba(245,166,35,.28);
+  border-radius: 14px; padding: 14px 16px;
+}
+.warn .icon { color: var(--warn); flex: none; margin-top: 1px }
+.warn b { display: block; font-size: 14px; margin-bottom: 3px }
+.warn span { font-size: 13px; color: var(--dim); line-height: 1.5 }
+.warn i { color: #cfd0da; font-style: normal }
+
+.update-banner {
+  display: flex; gap: 13px; align-items: center; margin-top: 14px;
+  background: rgba(91,141,239,.12); border: 1px solid rgba(91,141,239,.3);
+  border-radius: 14px; padding: 14px 16px;
+}
+.update-banner .icon { color: var(--accent); flex: none }
+.update-banner b { display: block; font-size: 14px; margin-bottom: 2px }
+.update-banner span { font-size: 13px; color: var(--dim) }
+.update-banner div { flex: 1 }
+.update-btn {
+  background: var(--grad); color: #fff; border: none; border-radius: 10px;
+  padding: 9px 16px; font-size: 14px; font-weight: 600; cursor: pointer;
+  text-decoration: none; white-space: nowrap;
+}
+.update-btn:hover { opacity: .85 }
+
+.foot { margin-top: 22px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #54555f }
+.version { font-variant-numeric: tabular-nums }
+
+.toast {
+  position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px);
+  background: var(--accent); color: #fff; padding: 11px 20px; border-radius: 999px;
+  font-size: 14px; font-weight: 550; opacity: 0; pointer-events: none;
+  transition: opacity .25s ease, transform .25s ease;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0) }
+[hidden] { display: none !important }

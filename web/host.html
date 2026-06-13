@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/host.css">
+<title>CamLink · Host</title>
+</head>
+<body>
+
+<main class="card">
+  <header class="head">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" class="icon"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+    </div>
+    <div>
+      <h1>CamLink</h1>
+      <p class="sub">Il telefono come webcam</p>
+    </div>
+  </header>
+
+  <section class="qrwrap">
+    <div class="qrbox"><img id="qr" src="/qr.svg" alt="QR"></div>
+    <div class="qrside">
+      <p class="step-label">1 · Inquadra il QR col telefono</p>
+      <p class="muted">oppure apri questo indirizzo nel browser del telefono (stessa rete WiFi):</p>
+      <button id="url" class="urlchip" title="Copia">…</button>
+      <p class="step-label" style="margin-top:14px">2 · Tocca <b>Avvia</b></p>
+      <p class="muted">alla prima apertura accetta l'avviso del certificato: “Avanzate” → “Procedi”.</p>
+    </div>
+  </section>
+
+  <section id="statusRow" class="status waiting">
+    <span class="dot"></span>
+    <span id="statusText">In attesa del telefono…</span>
+    <span id="statusMeta" class="meta"></span>
+  </section>
+
+  <section id="obsWarn" class="warn" hidden>
+    <svg viewBox="0 0 24 24" class="icon"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    <div>
+      <b>Virtual Camera non attiva.</b>
+      <span>Apri OBS → <i>Strumenti → Avvia Virtual Camera</i>. Poi seleziona “OBS Virtual Camera” in Discord/Zoom/Meet.</span>
+    </div>
+  </section>
+
+  <section id="updateBanner" class="update-banner" hidden>
+    <svg viewBox="0 0 24 24" class="icon"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+    <div>
+      <b>Aggiornamento disponibile</b>
+      <span id="updateVer"></span>
+    </div>
+    <a id="updateBtn" class="update-btn" href="#" target="_blank">Scarica</a>
+  </section>
+
+  <footer class="foot">
+    <span>Rete locale · WebRTC · nessun dato esce dal tuo computer</span>
+    <span id="versionLabel" class="version"></span>
+  </footer>
+</main>
+
+<div id="toast" class="toast">Indirizzo copiato</div>
+
+<script src="/host.js"></script>
+</body>
+</html>

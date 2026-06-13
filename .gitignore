@@ -1,0 +1,28 @@
+# Build artifacts
+build/dist/
+build/work/
+installer/output/
+*.spec
+
+# Generated assets (rebuilding li rigenera)
+assets/icon.ico
+assets/icon.png
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Dati locali runtime (certificato SSL)
+data/
+cert.pem
+key.pem
+
+# AI / editor
+.claude/
+.vscode/settings.json
+*.swp
+.DS_Store
+Thumbs.db
