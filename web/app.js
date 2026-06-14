@@ -99,9 +99,29 @@ function stop() {
   ctaSpinner(false);
 }
 
-function flip() {
+async function flip() {
   haptic();
   facing = facing === 'environment' ? 'user' : 'environment';
+  if (live && pc && pc.connectionState === 'connected') {
+    try {
+      const q = QUALITY[quality];
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: facing }, width: { ideal: q.w }, height: { ideal: q.h }, frameRate: { ideal: q.fps } },
+        audio: false,
+      });
+      const newTrack = newStream.getVideoTracks()[0];
+      try { newTrack.contentHint = 'motion'; } catch (e) {}
+      const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+      if (sender) {
+        if (stream) stream.getTracks().forEach(t => t.stop());
+        stream = newStream;
+        $('v').srcObject = stream;
+        await sender.replaceTrack(newTrack);
+        setupCapabilities(newTrack);
+        return;
+      }
+    } catch (e) {}
+  }
   start();
 }
 
@@ -145,11 +165,33 @@ async function setZoom(val) {
 const openSheet  = () => { haptic(); $('sheet').classList.add('open'); $('scrim').classList.add('open'); };
 const closeSheet = () => { $('sheet').classList.remove('open'); $('scrim').classList.remove('open'); };
 
-function setQuality(key) {
+async function setQuality(key) {
   haptic();
   quality = key;
   document.querySelectorAll('#seg button').forEach(b => b.classList.toggle('active', b.dataset.q === key));
-  if (live) start();
+  if (!live) return;
+  if (pc && pc.connectionState === 'connected') {
+    try {
+      const q = QUALITY[key];
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: facing }, width: { ideal: q.w }, height: { ideal: q.h }, frameRate: { ideal: q.fps } },
+        audio: false,
+      });
+      const newTrack = newStream.getVideoTracks()[0];
+      try { newTrack.contentHint = 'motion'; } catch (e) {}
+      const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+      if (sender) {
+        if (stream) stream.getTracks().forEach(t => t.stop());
+        stream = newStream;
+        $('v').srcObject = stream;
+        await sender.replaceTrack(newTrack);
+        await applyBitrate();
+        setupCapabilities(newTrack);
+        return;
+      }
+    } catch (e) {}
+  }
+  start();
 }
 
 function toggleMirror(on) {
@@ -208,7 +250,7 @@ async function connect() {
   if (pc) pc.close();
   setPill('Connessione…', '');
 
-  pc = new RTCPeerConnection({ iceServers: [], iceCandidatePoolSize: 1 });
+  pc = new RTCPeerConnection({ iceServers: [], iceCandidatePoolSize: 2 });
   stream.getTracks().forEach(t => pc.addTrack(t, stream));
   preferH264(pc);
 
