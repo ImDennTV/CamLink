@@ -34,7 +34,7 @@ from aiortc import RTCPeerConnection, RTCSessionDescription
 
 # ── Configurazione ────────────────────────────────────────────────────────────
 
-VERSION      = "1.0.2"
+VERSION      = "1.0.3"
 GITHUB_REPO  = "ImDennTV/CamLink"
 
 HTTPS_PORT   = 8443          # porta per il telefono (richiede HTTPS per la camera)
@@ -242,7 +242,7 @@ async def route_offer(request: web.Request) -> web.Response:
     await pc.setLocalDescription(answer)
 
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + 8.0
+    deadline = loop.time() + 3.0
     while pc.iceGatheringState != 'complete' and loop.time() < deadline:
         await asyncio.sleep(0.05)
 
