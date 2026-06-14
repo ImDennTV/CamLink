@@ -69,6 +69,11 @@ async function start() {
     try { track.contentHint = 'motion'; } catch (e) {}
     $('v').srcObject = stream;
 
+    // Quando l'OS uccide il track (schermo spento) → riavvio completo
+    track.addEventListener('ended', () => {
+      if (live) { setPill('Riconnessione…', 'bad'); setTimeout(start, 800); }
+    });
+
     live = true;
     document.body.classList.add('streaming');
     setPill('Connessione…', '');
@@ -245,6 +250,17 @@ async function applyBitrate() {
   } catch (e) {}
 }
 
+function _trackAlive() {
+  return stream && stream.getVideoTracks().some(t => t.readyState === 'live');
+}
+
+function _smartReconnect() {
+  if (!live) return;
+  // Se il track camera è morto (schermo spento, OS l'ha killato) → start completo
+  // Se è ancora vivo → basta riconnettersi WebRTC
+  if (_trackAlive()) { connect(); } else { start(); }
+}
+
 async function connect() {
   clearTimeout(retryT);
   if (pc) pc.close();
@@ -263,7 +279,7 @@ async function connect() {
       startStats();
     } else if (st === 'disconnected' || st === 'failed') {
       setPill('Riconnessione…', 'bad');
-      retryT = setTimeout(connect, 1500);
+      retryT = setTimeout(_smartReconnect, 1500);
     }
   };
 
@@ -279,7 +295,7 @@ async function connect() {
     });
   } catch (e) {
     setPill('Errore di rete', 'bad');
-    retryT = setTimeout(connect, 2000);
+    retryT = setTimeout(_smartReconnect, 2000);
     return;
   }
   if (!r.ok) { setPill('Errore server', 'bad'); return; }
@@ -314,7 +330,7 @@ function startStats() {
             if (_frozenTicks >= 4 && live) {
               _frozenTicks = 0;
               setPill('Riconnessione…', 'bad');
-              connect();
+              _smartReconnect();
               return;
             }
           } else {
