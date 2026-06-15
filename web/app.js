@@ -11,7 +11,7 @@ const QUALITY = {
   '720p30':  { w: 1280, h: 720,  fps: 30 },
 };
 
-let pc, stream, retryT, statsTimer, wakeLock;
+let pc, stream, retryT, statsTimer, wakeLock, _wakeLockTimer;
 let facing  = 'environment';
 let quality = '720p60';
 let statsOn = true;
@@ -22,9 +22,25 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').cat
 
 /* ── Wake lock: schermo sempre acceso mentre si trasmette ────────────────── */
 async function acquireWakeLock() {
-  try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); }
-  catch (e) {}
+  if (!('wakeLock' in navigator)) return;
+  try {
+    if (wakeLock && !wakeLock.released) return;
+    wakeLock = await navigator.wakeLock.request('screen');
+  } catch (e) {}
 }
+
+function _startWakeLockKeeper() {
+  _stopWakeLockKeeper();
+  acquireWakeLock();
+  _wakeLockTimer = setInterval(acquireWakeLock, 25000);
+}
+
+function _stopWakeLockKeeper() {
+  clearInterval(_wakeLockTimer);
+  _wakeLockTimer = null;
+  if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+}
+
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && live) acquireWakeLock();
 });
@@ -78,7 +94,7 @@ async function start() {
     document.body.classList.add('streaming');
     setPill('Connessione…', '');
     setupCapabilities(track);
-    acquireWakeLock();
+    _startWakeLockKeeper();
     connect();
   } catch (e) {
     live = false;
@@ -95,7 +111,7 @@ function stop() {
   clearInterval(statsTimer);
   if (pc) { pc.close(); pc = null; }
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-  if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+  _stopWakeLockKeeper();
   closeSheet();
   document.body.classList.remove('streaming');
   $('v').srcObject = null;
