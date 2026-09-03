@@ -11,10 +11,23 @@ const QUALITY = {
   '720p30':  { w: 1280, h: 720,  fps: 30 },
 };
 
+/* ── Impostazioni persistenti (sopravvivono a riavvii/refresh) ───────────── */
+const SETTINGS_KEY = 'camlink.settings';
+function loadSettings() {
+  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; }
+  catch (e) { return {}; }
+}
+function saveSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ quality, facing, mirror, statsOn })); }
+  catch (e) {}
+}
+const _saved = loadSettings();
+
 let pc, stream, retryT, statsTimer, wakeLock, _wakeLockTimer;
-let facing  = 'environment';
-let quality = '720p60';
-let statsOn = true;
+let facing  = _saved.facing  ?? 'environment';
+let quality = _saved.quality ?? '720p60';
+let mirror  = _saved.mirror  ?? false;
+let statsOn = _saved.statsOn ?? true;
 let live    = false;
 
 /* ── Service worker (installabilità PWA) ─────────────────────────────────── */
@@ -123,6 +136,7 @@ function stop() {
 async function flip() {
   haptic();
   facing = facing === 'environment' ? 'user' : 'environment';
+  saveSettings();
   if (live && pc && pc.connectionState === 'connected') {
     try {
       const q = QUALITY[quality];
@@ -189,6 +203,7 @@ const closeSheet = () => { $('sheet').classList.remove('open'); $('scrim').class
 async function setQuality(key) {
   haptic();
   quality = key;
+  saveSettings();
   document.querySelectorAll('#seg button').forEach(b => b.classList.toggle('active', b.dataset.q === key));
   if (!live) return;
   if (pc && pc.connectionState === 'connected') {
@@ -217,13 +232,15 @@ async function setQuality(key) {
 
 function toggleMirror(on) {
   haptic();
+  mirror = on;
+  saveSettings();
   fetch('/control', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mirror: on }),
   }).catch(() => {});
 }
 
-function toggleStats(on) { statsOn = on; if (!on) setPill('Live', 'good'); }
+function toggleStats(on) { statsOn = on; saveSettings(); if (!on) setPill('Live', 'good'); }
 
 /* ── WebRTC ──────────────────────────────────────────────────────────────── */
 function preferH264(pc) {
@@ -295,7 +312,7 @@ async function connect() {
       startStats();
     } else if (st === 'disconnected' || st === 'failed') {
       setPill('Riconnessione…', 'bad');
-      retryT = setTimeout(_smartReconnect, 1500);
+      retryT = setTimeout(_smartReconnect, 800);
     }
   };
 
@@ -386,3 +403,14 @@ $('zoom').oninput        = e => setZoom(e.target.value);
 $('swMirror').onchange   = e => toggleMirror(e.target.checked);
 $('swStats').onchange    = e => toggleStats(e.target.checked);
 document.querySelectorAll('#seg button').forEach(b => b.onclick = () => setQuality(b.dataset.q));
+
+/* ── Applica impostazioni salvate alla UI ─────────────────────────────────── */
+document.querySelectorAll('#seg button').forEach(b => b.classList.toggle('active', b.dataset.q === quality));
+$('swMirror').checked = mirror;
+$('swStats').checked  = statsOn;
+if (mirror) {
+  fetch('/control', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mirror: true }),
+  }).catch(() => {});
+}
