@@ -34,7 +34,7 @@ from aiortc import RTCPeerConnection, RTCSessionDescription
 
 # ── Configurazione ────────────────────────────────────────────────────────────
 
-VERSION      = "1.0.5"
+VERSION      = "1.0.6"
 GITHUB_REPO  = "ImDennTV/CamLink"
 
 HTTPS_PORT   = 8443          # porta per il telefono (richiede HTTPS per la camera)
@@ -194,6 +194,17 @@ _vcam = VCam()
 
 _pcs: set[RTCPeerConnection] = set()
 _connected = False
+_connected_since: float | None = None
+_tray_icon = None
+
+
+def _notify_tray(title: str, message: str) -> None:
+    if _tray_icon is None:
+        return
+    try:
+        _tray_icon.notify(message, title)
+    except Exception:
+        pass
 
 
 async def _consume_video(track) -> None:
@@ -228,14 +239,21 @@ async def route_offer(request: web.Request) -> web.Response:
 
     @pc.on('connectionstatechange')
     async def on_state():
-        global _connected
+        global _connected, _connected_since
         s = pc.connectionState
         icons = {'connected': '[OK]', 'disconnected': '[--]', 'failed': '[!!]', 'closed': '[  ]'}
         print(f'[rtc] {icons.get(s, "[ ]")} {s}')
+        was_connected = _connected
         _connected = any(p.connectionState == 'connected' for p in _pcs)
         if s in ('failed', 'closed', 'disconnected'):
             _pcs.discard(pc)
             _connected = any(p.connectionState == 'connected' for p in _pcs)
+        if _connected and not was_connected:
+            _connected_since = time.monotonic()
+            _notify_tray('CamLink', 'Telefono connesso')
+        elif was_connected and not _connected:
+            _connected_since = None
+            _notify_tray('CamLink', 'Telefono disconnesso')
 
     await pc.setRemoteDescription(offer)
     answer = await pc.createAnswer()
@@ -299,10 +317,12 @@ async def route_qr(request: web.Request) -> web.Response:
 
 
 async def route_hostinfo(request: web.Request) -> web.Response:
+    uptime = (time.monotonic() - _connected_since) if _connected_since else 0
     return web.json_response({
         'url': f'https://{_primary_ip()}:{HTTPS_PORT}',
         'ips': _local_ips(),
         'connected': _connected,
+        'uptime': round(uptime),
         'cam': _vcam.status(),
     })
 
@@ -493,6 +513,7 @@ def _tray_image():
 def _run_tray(dash_url: str) -> None:
     import pystray
     from pystray import Menu, MenuItem
+    global _tray_icon
 
     def open_dash(icon=None, item=None):
         try: webbrowser.open(dash_url)
@@ -509,6 +530,7 @@ def _run_tray(dash_url: str) -> None:
             MenuItem('Esci', quit_app),
         ),
     )
+    _tray_icon = icon
     icon.run()
 
 

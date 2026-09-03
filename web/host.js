@@ -3,6 +3,12 @@
 
 const $ = id => document.getElementById(id);
 
+function fmtUptime(sec) {
+  sec = Math.max(0, sec | 0);
+  const m = (sec / 60) | 0, s = sec % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 async function poll() {
   try {
     const r = await fetch('/hostinfo', { cache: 'no-store' });
@@ -17,7 +23,8 @@ async function poll() {
       $('statusText').textContent = 'Telefono connesso';
       const res = cam.width ? `${cam.width}×${cam.height}` : '';
       const fps = cam.fps ? ` · ${cam.fps} fps` : '';
-      $('statusMeta').textContent = res + fps;
+      const up = d.uptime ? ` · ${fmtUptime(d.uptime)}` : '';
+      $('statusMeta').textContent = res + fps + up;
     } else if (d.connected) {
       row.className = 'status connected';
       $('statusText').textContent = 'Connesso, in attesa del video…';
