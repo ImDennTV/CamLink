@@ -10,6 +10,8 @@ const QUALITY = {
   '720p60':  { w: 1280, h: 720,  fps: 60 },
   '720p30':  { w: 1280, h: 720,  fps: 30 },
 };
+// Ordine per la qualità automatica: dal più esigente in banda al più leggero.
+const QUALITY_ORDER = ['1080p30', '720p60', '720p30'];
 
 /* ── Impostazioni persistenti (sopravvivono a riavvii/refresh) ───────────── */
 const SETTINGS_KEY = 'camlink.settings';
@@ -18,17 +20,20 @@ function loadSettings() {
   catch (e) { return {}; }
 }
 function saveSettings() {
-  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ quality, facing, mirror, statsOn })); }
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ quality, facing, mirror, statsOn, autoQuality })); }
   catch (e) {}
 }
 const _saved = loadSettings();
 
 let pc, stream, retryT, statsTimer, wakeLock, _wakeLockTimer;
-let facing  = _saved.facing  ?? 'environment';
-let quality = _saved.quality ?? '720p60';
-let mirror  = _saved.mirror  ?? false;
-let statsOn = _saved.statsOn ?? true;
-let live    = false;
+let facing      = _saved.facing      ?? 'environment';
+let quality     = _saved.quality     ?? '720p60';
+let mirror      = _saved.mirror      ?? false;
+let statsOn     = _saved.statsOn     ?? true;
+let autoQuality = _saved.autoQuality ?? true;
+let live        = false;
+let _manualDeviceId = null;   // set quando l'utente sceglie una camera specifica dalla lista
+let _cameras = [];
 
 /* ── Service worker (installabilità PWA) ─────────────────────────────────── */
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
@@ -58,6 +63,26 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && live) acquireWakeLock();
 });
 
+/* ── Batteria: la manda al PC per mostrarla nella dashboard ───────────────── */
+let _batteryInited = false;
+async function _initBattery() {
+  if (_batteryInited || !navigator.getBattery) return;
+  _batteryInited = true;
+  try {
+    const battery = await navigator.getBattery();
+    const send = () => {
+      fetch('/battery', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ level: battery.level, charging: battery.charging }),
+      }).catch(() => {});
+    };
+    send();
+    battery.addEventListener('levelchange', send);
+    battery.addEventListener('chargingchange', send);
+    setInterval(send, 30000);
+  } catch (e) {}
+}
+
 /* ── UI helpers ──────────────────────────────────────────────────────────── */
 const setPill  = (text, cls) => { $('pillTxt').textContent = text; $('pill').className = cls || ''; };
 const setError = msg => { $('err').textContent = msg || ''; };
@@ -77,20 +102,22 @@ function ctaSpinner(on) {
 }
 
 /* ── Camera ──────────────────────────────────────────────────────────────── */
+function _videoConstraints(key, deviceId) {
+  const q = QUALITY[key];
+  const base = { width: { ideal: q.w }, height: { ideal: q.h }, frameRate: { ideal: q.fps } };
+  return deviceId
+    ? { ...base, deviceId: { exact: deviceId } }
+    : { ...base, facingMode: { ideal: facing } };
+}
+
 async function start() {
   haptic(12);
   setError('');
   ctaSpinner(true);
-  const q = QUALITY[quality];
   try {
     if (stream) stream.getTracks().forEach(t => t.stop());
     stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: facing },
-        width:      { ideal: q.w },
-        height:     { ideal: q.h },
-        frameRate:  { ideal: q.fps },
-      },
+      video: _videoConstraints(quality, _manualDeviceId),
       audio: false,
     });
 
@@ -108,6 +135,8 @@ async function start() {
     setPill('Connessione…', '');
     setupCapabilities(track);
     _startWakeLockKeeper();
+    _initBattery();
+    _refreshCameraList();
     connect();
   } catch (e) {
     live = false;
@@ -133,29 +162,67 @@ function stop() {
   ctaSpinner(false);
 }
 
+/* Sostituisce il track video in corsa (camera diversa/qualità diversa) senza
+   toccare la connessione WebRTC — nessun disconnect, nessun freeze percepito. */
+async function _switchTrack(constraints) {
+  const newStream = await navigator.mediaDevices.getUserMedia({ video: constraints, audio: false });
+  const newTrack = newStream.getVideoTracks()[0];
+  try { newTrack.contentHint = 'motion'; } catch (e) {}
+  newTrack.addEventListener('ended', () => {
+    if (live) { setPill('Riconnessione…', 'bad'); setTimeout(start, 800); }
+  });
+  const sender = pc && pc.getSenders().find(s => s.track && s.track.kind === 'video');
+  if (!sender) { newStream.getTracks().forEach(t => t.stop()); throw new Error('no sender'); }
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = newStream;
+  $('v').srcObject = stream;
+  await sender.replaceTrack(newTrack);
+  setupCapabilities(newTrack);
+  return newTrack;
+}
+
 async function flip() {
   haptic();
   facing = facing === 'environment' ? 'user' : 'environment';
+  _manualDeviceId = null;
   saveSettings();
   if (live && pc && pc.connectionState === 'connected') {
-    try {
-      const q = QUALITY[quality];
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: facing }, width: { ideal: q.w }, height: { ideal: q.h }, frameRate: { ideal: q.fps } },
-        audio: false,
-      });
-      const newTrack = newStream.getVideoTracks()[0];
-      try { newTrack.contentHint = 'motion'; } catch (e) {}
-      const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-      if (sender) {
-        if (stream) stream.getTracks().forEach(t => t.stop());
-        stream = newStream;
-        $('v').srcObject = stream;
-        await sender.replaceTrack(newTrack);
-        setupCapabilities(newTrack);
-        return;
-      }
-    } catch (e) {}
+    try { await _switchTrack(_videoConstraints(quality, null)); return; }
+    catch (e) {}
+  }
+  start();
+}
+
+/* ── Multi-camera: lista/selezione quando il telefono ha più di 2 obiettivi ── */
+async function _refreshCameraList() {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    _cameras = devices.filter(d => d.kind === 'videoinput');
+  } catch (e) { _cameras = []; }
+  _renderCameraList();
+}
+
+function _renderCameraList() {
+  const row = $('cameraRow'), sel = $('cameraSelect');
+  if (_cameras.length <= 2) { row.hidden = true; return; }
+  sel.innerHTML = '';
+  _cameras.forEach((cam, i) => {
+    const opt = document.createElement('option');
+    opt.value = cam.deviceId;
+    opt.textContent = cam.label || `Camera ${i + 1}`;
+    sel.appendChild(opt);
+  });
+  if (_manualDeviceId) sel.value = _manualDeviceId;
+  row.hidden = false;
+}
+
+async function selectCamera(deviceId) {
+  haptic();
+  _manualDeviceId = deviceId;
+  if (!live) return;
+  if (pc && pc.connectionState === 'connected') {
+    try { await _switchTrack(_videoConstraints(quality, deviceId)); return; }
+    catch (e) {}
   }
   start();
 }
@@ -200,34 +267,31 @@ async function setZoom(val) {
 const openSheet  = () => { haptic(); $('sheet').classList.add('open'); $('scrim').classList.add('open'); };
 const closeSheet = () => { $('sheet').classList.remove('open'); $('scrim').classList.remove('open'); };
 
-async function setQuality(key) {
-  haptic();
+async function setQuality(key, opts) {
+  const auto = !!(opts && opts.auto);
+  if (!auto) { haptic(); autoQuality = false; $('swAutoQuality').checked = false; }
   quality = key;
+  // Pausa di 10s prima che la logica automatica rivaluti, dopo QUALSIASI cambio
+  // (manuale o automatico) — evita che rivaluti su statistiche non ancora stabili.
+  _autoBadCount = 0; _autoGoodCount = 0; _autoCooldownUntil = Date.now() + 10000;
   saveSettings();
   document.querySelectorAll('#seg button').forEach(b => b.classList.toggle('active', b.dataset.q === key));
   if (!live) return;
   if (pc && pc.connectionState === 'connected') {
     try {
-      const q = QUALITY[key];
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: facing }, width: { ideal: q.w }, height: { ideal: q.h }, frameRate: { ideal: q.fps } },
-        audio: false,
-      });
-      const newTrack = newStream.getVideoTracks()[0];
-      try { newTrack.contentHint = 'motion'; } catch (e) {}
-      const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-      if (sender) {
-        if (stream) stream.getTracks().forEach(t => t.stop());
-        stream = newStream;
-        $('v').srcObject = stream;
-        await sender.replaceTrack(newTrack);
-        await applyBitrate();
-        setupCapabilities(newTrack);
-        return;
-      }
+      await _switchTrack(_videoConstraints(key, _manualDeviceId));
+      await applyBitrate();
+      return;
     } catch (e) {}
   }
   start();
+}
+
+function toggleAutoQuality(on) {
+  haptic();
+  autoQuality = on;
+  _autoBadCount = 0; _autoGoodCount = 0; _autoCooldownUntil = Date.now() + 5000;
+  saveSettings();
 }
 
 function toggleMirror(on) {
@@ -338,9 +402,34 @@ async function connect() {
 
 /* ── Statistiche + qualità connessione ───────────────────────────────────── */
 let _lastBytes = 0, _lastTs = 0, _frozenTicks = 0, _lastFrames = 0;
+let _autoBadCount = 0, _autoGoodCount = 0, _autoCooldownUntil = 0;
+
+/* Cambia qualità da sola solo dopo diversi secondi CONSECUTIVI di rete
+   davvero scarsa (mai per un singolo scatto) e torna su solo dopo un periodo
+   lungo di rete buona — isteresi larga apposta per non "ballare" a caso.
+   Si basa sugli fps reali rispetto al target: è il segnale più affidabile,
+   a differenza del bitrate che varia anche solo per il contenuto inquadrato
+   (una scena ferma usa meno banda pur con rete perfetta). */
+function _autoAdjust(fps, target) {
+  if (!autoQuality || Date.now() < _autoCooldownUntil) return;
+  const bad  = fps < target * 0.6;
+  const good = fps >= target * 0.92;
+  if (bad)       { _autoBadCount++; _autoGoodCount = 0; }
+  else if (good) { _autoGoodCount++; _autoBadCount = 0; }
+  else           { _autoBadCount = 0; _autoGoodCount = 0; }
+
+  const qi = QUALITY_ORDER.indexOf(quality);
+  if (_autoBadCount >= 8 && qi < QUALITY_ORDER.length - 1) {
+    setQuality(QUALITY_ORDER[qi + 1], { auto: true });
+  } else if (_autoGoodCount >= 20 && qi > 0) {
+    setQuality(QUALITY_ORDER[qi - 1], { auto: true });
+  }
+}
+
 function startStats() {
   clearInterval(statsTimer);
   _lastBytes = 0; _lastTs = 0; _frozenTicks = 0; _lastFrames = 0;
+  _autoBadCount = 0; _autoGoodCount = 0; _autoCooldownUntil = Date.now() + 6000;
   statsTimer = setInterval(async () => {
     if (!pc) return;
     try {
@@ -372,6 +461,7 @@ function startStats() {
           _lastFrames = frames;
 
           const target = QUALITY[quality].fps;
+          _autoAdjust(fps, target);
           let cls = 'good';
           if (fps < target * 0.5 || mbps < 1) cls = 'bad';
           else if (fps < target * 0.75 || mbps < 2.5) cls = 'warn';
@@ -402,12 +492,15 @@ $('scrim').onclick       = closeSheet;
 $('zoom').oninput        = e => setZoom(e.target.value);
 $('swMirror').onchange   = e => toggleMirror(e.target.checked);
 $('swStats').onchange    = e => toggleStats(e.target.checked);
+$('swAutoQuality').onchange = e => toggleAutoQuality(e.target.checked);
+$('cameraSelect').onchange  = e => selectCamera(e.target.value);
 document.querySelectorAll('#seg button').forEach(b => b.onclick = () => setQuality(b.dataset.q));
 
 /* ── Applica impostazioni salvate alla UI ─────────────────────────────────── */
 document.querySelectorAll('#seg button').forEach(b => b.classList.toggle('active', b.dataset.q === quality));
 $('swMirror').checked = mirror;
 $('swStats').checked  = statsOn;
+$('swAutoQuality').checked = autoQuality;
 if (mirror) {
   fetch('/control', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },

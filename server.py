@@ -34,7 +34,7 @@ from aiortc import RTCPeerConnection, RTCSessionDescription
 
 # ── Configurazione ────────────────────────────────────────────────────────────
 
-VERSION      = "1.0.6"
+VERSION      = "1.0.7"
 GITHUB_REPO  = "ImDennTV/CamLink"
 
 HTTPS_PORT   = 8443          # porta per il telefono (richiede HTTPS per la camera)
@@ -196,6 +196,8 @@ _pcs: set[RTCPeerConnection] = set()
 _connected = False
 _connected_since: float | None = None
 _tray_icon = None
+_net_mbps = 0.0
+_battery: dict = {'level': None, 'charging': None}
 
 
 def _notify_tray(title: str, message: str) -> None:
@@ -220,6 +222,31 @@ async def _consume_video(track) -> None:
     print('[rtc] Track terminato')
 
 
+async def _poll_net_stats(pc: RTCPeerConnection) -> None:
+    """Misura il bitrate video reale in ricezione (per il grafico in dashboard)."""
+    global _net_mbps
+    last_bytes = None
+    last_ts = None
+    while pc in _pcs:
+        await asyncio.sleep(1.0)
+        if pc.connectionState != 'connected':
+            continue
+        try:
+            report = await pc.getStats()
+            for s in report.values():
+                if getattr(s, 'type', '') == 'inbound-rtp' and getattr(s, 'kind', '') == 'video':
+                    now = time.monotonic()
+                    b = s.bytesReceived
+                    if last_ts is not None:
+                        dt = now - last_ts
+                        if dt > 0:
+                            _net_mbps = (b - last_bytes) * 8 / dt / 1e6
+                    last_bytes, last_ts = b, now
+        except Exception:
+            break
+    _net_mbps = 0.0
+
+
 async def route_offer(request: web.Request) -> web.Response:
     global _connected
     body  = await request.json()
@@ -231,6 +258,7 @@ async def route_offer(request: web.Request) -> web.Response:
 
     pc = RTCPeerConnection()
     _pcs.add(pc)
+    asyncio.ensure_future(_poll_net_stats(pc))
 
     @pc.on('track')
     def on_track(track):
@@ -253,6 +281,8 @@ async def route_offer(request: web.Request) -> web.Response:
             _notify_tray('CamLink', 'Telefono connesso')
         elif was_connected and not _connected:
             _connected_since = None
+            _battery['level'] = None
+            _battery['charging'] = None
             _notify_tray('CamLink', 'Telefono disconnesso')
 
     await pc.setRemoteDescription(offer)
@@ -274,6 +304,16 @@ async def route_control(request: web.Request) -> web.Response:
         return web.Response(status=400, text='bad request')
     if 'mirror' in body:
         _vcam.set_mirror(body['mirror'])
+    return web.json_response({'ok': True})
+
+
+async def route_battery(request: web.Request) -> web.Response:
+    try:
+        body = await request.json()
+    except Exception:
+        return web.Response(status=400, text='bad request')
+    _battery['level'] = body.get('level')
+    _battery['charging'] = body.get('charging')
     return web.json_response({'ok': True})
 
 
@@ -324,6 +364,8 @@ async def route_hostinfo(request: web.Request) -> web.Response:
         'connected': _connected,
         'uptime': round(uptime),
         'cam': _vcam.status(),
+        'net': {'mbps': round(_net_mbps, 2)},
+        'battery': _battery,
     })
 
 
@@ -553,6 +595,7 @@ def _build_app() -> web.Application:
     r.add_get('/hostinfo',             route_hostinfo)
     r.add_post('/offer',               route_offer)
     r.add_post('/control',             route_control)
+    r.add_post('/battery',             route_battery)
     r.add_get('/update-info',          route_update_info)
     app.on_shutdown.append(_on_shutdown)
     return app

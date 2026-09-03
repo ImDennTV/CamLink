@@ -34,7 +34,19 @@
   <section id="statusRow" class="status waiting">
     <span class="dot"></span>
     <span id="statusText">In attesa del telefono…</span>
+    <span id="battInfo" class="batt" hidden>
+      <svg viewBox="0 0 24 24" class="icon batt-icon"><rect x="1" y="6" width="19" height="12" rx="2.5"/><line x1="23" y1="10" x2="23" y2="14"/></svg>
+      <span id="battPct"></span>
+    </span>
     <span id="statusMeta" class="meta"></span>
+  </section>
+
+  <section id="graphWrap" class="graphwrap" hidden>
+    <canvas id="graph"></canvas>
+    <div class="graph-legend">
+      <span class="lg lg-fps">fps</span>
+      <span class="lg lg-mbps">Mbps</span>
+    </div>
   </section>
 
   <section id="obsWarn" class="warn" hidden>
