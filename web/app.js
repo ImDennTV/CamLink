@@ -185,6 +185,7 @@ async function flip() {
   haptic();
   facing = facing === 'environment' ? 'user' : 'environment';
   _manualDeviceId = null;
+  $('cameraSelect').value = '';
   saveSettings();
   if (live && pc && pc.connectionState === 'connected') {
     try { await _switchTrack(_videoConstraints(quality, null)); return; }
@@ -206,22 +207,25 @@ function _renderCameraList() {
   const row = $('cameraRow'), sel = $('cameraSelect');
   if (_cameras.length <= 2) { row.hidden = true; return; }
   sel.innerHTML = '';
+  const auto = document.createElement('option');
+  auto.value = ''; auto.textContent = 'Automatica';
+  sel.appendChild(auto);
   _cameras.forEach((cam, i) => {
     const opt = document.createElement('option');
     opt.value = cam.deviceId;
     opt.textContent = cam.label || `Camera ${i + 1}`;
     sel.appendChild(opt);
   });
-  if (_manualDeviceId) sel.value = _manualDeviceId;
+  sel.value = _manualDeviceId || '';
   row.hidden = false;
 }
 
 async function selectCamera(deviceId) {
   haptic();
-  _manualDeviceId = deviceId;
+  _manualDeviceId = deviceId || null;
   if (!live) return;
   if (pc && pc.connectionState === 'connected') {
-    try { await _switchTrack(_videoConstraints(quality, deviceId)); return; }
+    try { await _switchTrack(_videoConstraints(quality, _manualDeviceId)); return; }
     catch (e) {}
   }
   start();

@@ -34,7 +34,7 @@ from aiortc import RTCPeerConnection, RTCSessionDescription
 
 # ── Configurazione ────────────────────────────────────────────────────────────
 
-VERSION      = "1.0.7"
+VERSION      = "1.0.8"
 GITHUB_REPO  = "ImDennTV/CamLink"
 
 HTTPS_PORT   = 8443          # porta per il telefono (richiede HTTPS per la camera)
@@ -457,16 +457,44 @@ async def route_update_info(request: web.Request) -> web.Response:
 
 # ── OBS auto-start ────────────────────────────────────────────────────────────
 
+def _obs_ws_config() -> dict:
+    """Legge porta/password dal config di obs-websocket. Da OBS 28+ la password
+    e' generata automaticamente e l'autenticazione e' attiva di default, quindi
+    senza questo l'auto-avvio della Virtual Camera fallisce sempre in silenzio."""
+    try:
+        import json
+        cfg = Path(os.environ.get('APPDATA', '')) / 'obs-studio' / 'plugin_config' / 'obs-websocket' / 'config.json'
+        data = json.loads(cfg.read_text(encoding='utf-8'))
+        return {'port': data.get('server_port', 4455), 'password': data.get('server_password')}
+    except Exception:
+        return {'port': 4455, 'password': None}
+
+
+def _obs_auth_string(password: str, salt: str, challenge: str) -> str:
+    import base64
+    import hashlib
+    secret = base64.b64encode(hashlib.sha256((password + salt).encode()).digest()).decode()
+    return base64.b64encode(hashlib.sha256((secret + challenge).encode()).digest()).decode()
+
+
 async def _obs_start_virtualcam() -> bool:
     import aiohttp
+    cfg = _obs_ws_config()
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.ws_connect('ws://localhost:4455',
+            async with session.ws_connect(f'ws://localhost:{cfg["port"]}',
                                           timeout=aiohttp.ClientTimeout(total=3.0)) as ws:
                 msg = await asyncio.wait_for(ws.receive_json(), timeout=3.0)
-                if msg.get('op') != 0 or msg.get('d', {}).get('authentication'):
+                if msg.get('op') != 0:
                     return False
-                await ws.send_json({'op': 1, 'd': {'rpcVersion': 1, 'eventSubscriptions': 0}})
+                identify = {'rpcVersion': 1, 'eventSubscriptions': 0}
+                auth_info = msg.get('d', {}).get('authentication')
+                if auth_info:
+                    if not cfg['password']:
+                        return False  # richiede password ma non l'abbiamo trovata
+                    identify['authentication'] = _obs_auth_string(
+                        cfg['password'], auth_info['salt'], auth_info['challenge'])
+                await ws.send_json({'op': 1, 'd': identify})
                 msg = await asyncio.wait_for(ws.receive_json(), timeout=3.0)
                 if msg.get('op') != 2:
                     return False
