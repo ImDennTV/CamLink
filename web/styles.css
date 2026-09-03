@@ -194,6 +194,12 @@ input[type=range]::-moz-range-thumb { width: 24px; height: 24px; border: 0; bord
 .sw input:checked + span { background: var(--accent) }
 .sw input:checked + span::after { transform: translateX(20px) }
 
+.camSelect {
+  -webkit-appearance: none; appearance: none; max-width: 140px;
+  background: #33343f; color: var(--text); border: none; border-radius: 9px;
+  padding: 7px 12px; font: inherit; font-size: 13px; text-overflow: ellipsis;
+}
+
 .stop {
   width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px;
   background: rgba(239,68,68,.14); color: #ff6b6b; padding: 15px; border-radius: 14px;
