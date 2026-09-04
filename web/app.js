@@ -163,17 +163,22 @@ function stop() {
 }
 
 /* Sostituisce il track video in corsa (camera diversa/qualità diversa) senza
-   toccare la connessione WebRTC — nessun disconnect, nessun freeze percepito. */
+   riconnettere il WebRTC. Rilascia SEMPRE la vecchia camera prima di chiedere
+   la nuova: la maggior parte dei telefoni non può tenere aperte due fotocamere
+   fisiche insieme (es. frontale+posteriore), quindi chiedere la nuova prima
+   fallisce e fa scattare il fallback a start() — che quello sì disconnette
+   il WebRTC. Il costo è un frame nero per ~20ms, invisibile in pratica. */
 async function _switchTrack(constraints) {
+  const sender = pc && pc.getSenders().find(s => s.track && s.track.kind === 'video');
+  if (!sender) throw new Error('no sender');
+  if (stream) stream.getTracks().forEach(t => t.stop());
+
   const newStream = await navigator.mediaDevices.getUserMedia({ video: constraints, audio: false });
   const newTrack = newStream.getVideoTracks()[0];
   try { newTrack.contentHint = 'motion'; } catch (e) {}
   newTrack.addEventListener('ended', () => {
     if (live) { setPill('Riconnessione…', 'bad'); setTimeout(start, 800); }
   });
-  const sender = pc && pc.getSenders().find(s => s.track && s.track.kind === 'video');
-  if (!sender) { newStream.getTracks().forEach(t => t.stop()); throw new Error('no sender'); }
-  if (stream) stream.getTracks().forEach(t => t.stop());
   stream = newStream;
   $('v').srcObject = stream;
   await sender.replaceTrack(newTrack);
