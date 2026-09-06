@@ -34,7 +34,7 @@ from aiortc import RTCPeerConnection, RTCSessionDescription
 
 # ── Configurazione ────────────────────────────────────────────────────────────
 
-VERSION      = "1.1.0"
+VERSION      = "1.2.0"
 GITHUB_REPO  = "ImDennTV/CamLink"
 
 HTTPS_PORT   = 8443          # porta per il telefono (richiede HTTPS per la camera)
@@ -116,6 +116,8 @@ class VCam:
     recente. Se il PC rimane indietro i frame intermedi vengono scartati, cosi'
     la latenza resta costante invece di accumularsi."""
 
+    PREVIEW_FPS = 12
+
     def __init__(self) -> None:
         self._cam     = None
         self._w       = 0
@@ -128,7 +130,31 @@ class VCam:
         self._event   = threading.Event()
         self._last_ts = 0.0
         self._running = True
+        self.preview_viewers   = 0       # >0 solo quando la dashboard ha la preview aperta
+        self._preview_lock     = threading.Lock()
+        self._preview_jpeg     = None
+        self._last_preview_ts  = 0.0
         threading.Thread(target=self._run, daemon=True).start()
+
+    def get_preview_jpeg(self) -> bytes | None:
+        with self._preview_lock:
+            return self._preview_jpeg
+
+    def _update_preview(self, arr) -> None:
+        """Codifica il frame in JPEG per la preview della dashboard. Costa CPU
+        (JPEG encode), quindi gira solo se preview_viewers > 0 e a fps ridotto
+        (non serve un anteprima a 60fps per controllare che l'inquadratura sia
+        giusta) — non tocca in nessun modo il percorso principale verso OBS."""
+        try:
+            from PIL import Image
+            import io
+            img = Image.fromarray(arr[:, :, ::-1])  # BGR -> RGB
+            buf = io.BytesIO()
+            img.save(buf, format='JPEG', quality=70)
+            with self._preview_lock:
+                self._preview_jpeg = buf.getvalue()
+        except Exception:
+            pass
 
     def set_mirror(self, on: bool) -> None:
         self._mirror = bool(on)
@@ -215,6 +241,12 @@ class VCam:
             arr = arr[:, ::-1].copy()
         self._cam.send(arr)
 
+        if self.preview_viewers > 0:
+            now = time.monotonic()
+            if now - self._last_preview_ts >= (1.0 / self.PREVIEW_FPS):
+                self._last_preview_ts = now
+                self._update_preview(arr)
+
 
 _vcam = VCam()
 
@@ -225,8 +257,13 @@ _pcs: set[RTCPeerConnection] = set()
 _connected = False
 _connected_since: float | None = None
 _tray_icon = None
-_net_mbps = 0.0
 _battery: dict = {'level': None, 'charging': None}
+_phone_quality: str | None = None
+_EMPTY_NET_STATS: dict = {
+    'mbps': 0.0, 'packetsLost': 0, 'packetsReceived': 0,
+    'lossPercent': 0.0, 'jitterMs': 0.0,
+}
+_net_stats: dict = dict(_EMPTY_NET_STATS)
 
 
 def _notify_tray(title: str, message: str) -> None:
@@ -252,8 +289,16 @@ async def _consume_video(track) -> None:
 
 
 async def _poll_net_stats(pc: RTCPeerConnection) -> None:
-    """Misura il bitrate video reale in ricezione (per il grafico in dashboard)."""
-    global _net_mbps
+    """Statistiche reali della connessione (per grafico + pannello stats della
+    dashboard), tutte da pc.getStats(), non da valori target/teorici.
+
+    Il bitrate va preso da RTCTransportStats.bytesReceived, non da quello
+    dell'inbound-rtp video: in questa versione di aiortc RTCInboundRtpStreamStats
+    espone solo packetsReceived/packetsLost/jitter e NON bytesReceived (si
+    ferma a RTCReceivedRtpStreamStats). Usarlo lo' avrebbe fatto fallire ad ogni
+    giro con AttributeError, lasciando il grafico Mbps fermo a zero in
+    silenzio — bug presente (e mai notato) fin dalla v1.0.7."""
+    global _net_stats
     last_bytes = None
     last_ts = None
     while pc in _pcs:
@@ -262,18 +307,40 @@ async def _poll_net_stats(pc: RTCPeerConnection) -> None:
             continue
         try:
             report = await pc.getStats()
+            packets_lost = packets_received = 0
+            jitter_ms = 0.0
             for s in report.values():
                 if getattr(s, 'type', '') == 'inbound-rtp' and getattr(s, 'kind', '') == 'video':
-                    now = time.monotonic()
-                    b = s.bytesReceived
-                    if last_ts is not None:
-                        dt = now - last_ts
-                        if dt > 0:
-                            _net_mbps = (b - last_bytes) * 8 / dt / 1e6
-                    last_bytes, last_ts = b, now
+                    packets_lost = getattr(s, 'packetsLost', 0) or 0
+                    packets_received = getattr(s, 'packetsReceived', 0) or 0
+                    jitter_ms = (getattr(s, 'jitter', 0) or 0) * 1000
+                    break
+
+            mbps = _net_stats['mbps']
+            for s in report.values():
+                if getattr(s, 'type', '') == 'transport':
+                    b = getattr(s, 'bytesReceived', None)
+                    if b is not None:
+                        now = time.monotonic()
+                        if last_ts is not None:
+                            dt = now - last_ts
+                            if dt > 0:
+                                mbps = (b - last_bytes) * 8 / dt / 1e6
+                        last_bytes, last_ts = b, now
+                    break
+
+            total = packets_lost + packets_received
+            loss_pct = (packets_lost / total * 100) if total else 0.0
+            _net_stats = {
+                'mbps': round(mbps, 2),
+                'packetsLost': packets_lost,
+                'packetsReceived': packets_received,
+                'lossPercent': round(loss_pct, 2),
+                'jitterMs': round(jitter_ms, 1),
+            }
         except Exception:
             break
-    _net_mbps = 0.0
+    _net_stats = dict(_EMPTY_NET_STATS)
 
 
 async def route_offer(request: web.Request) -> web.Response:
@@ -296,7 +363,7 @@ async def route_offer(request: web.Request) -> web.Response:
 
     @pc.on('connectionstatechange')
     async def on_state():
-        global _connected, _connected_since
+        global _connected, _connected_since, _phone_quality
         s = pc.connectionState
         icons = {'connected': '[OK]', 'disconnected': '[--]', 'failed': '[!!]', 'closed': '[  ]'}
         print(f'[rtc] {icons.get(s, "[ ]")} {s}')
@@ -312,6 +379,7 @@ async def route_offer(request: web.Request) -> web.Response:
             _connected_since = None
             _battery['level'] = None
             _battery['charging'] = None
+            _phone_quality = None
             _notify_tray('CamLink', 'Telefono disconnesso')
 
     await pc.setRemoteDescription(offer)
@@ -327,12 +395,15 @@ async def route_offer(request: web.Request) -> web.Response:
 
 
 async def route_control(request: web.Request) -> web.Response:
+    global _phone_quality
     try:
         body = await request.json()
     except Exception:
         return web.Response(status=400, text='bad request')
     if 'mirror' in body:
         _vcam.set_mirror(body['mirror'])
+    if 'quality' in body:
+        _phone_quality = body['quality']
     return web.json_response({'ok': True})
 
 
@@ -344,6 +415,39 @@ async def route_battery(request: web.Request) -> web.Response:
     _battery['level'] = body.get('level')
     _battery['charging'] = body.get('charging')
     return web.json_response({'ok': True})
+
+
+async def route_preview(request: web.Request) -> web.StreamResponse:
+    # Il router e' condiviso tra la porta del telefono (8443, su tutta la LAN)
+    # e quella della dashboard (8080, solo 127.0.0.1): senza questo controllo
+    # chiunque sulla rete potrebbe vedere l'anteprima video andando su
+    # https://<ip-lan>:8443/preview.mjpg. La preview e' solo per la dashboard.
+    sockname = request.transport.get_extra_info('sockname') if request.transport else None
+    if not sockname or sockname[1] != DASH_PORT:
+        return web.Response(status=403, text='forbidden')
+
+    resp = web.StreamResponse(headers={
+        'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
+        'Cache-Control': 'no-store',
+    })
+    await resp.prepare(request)
+    _vcam.preview_viewers += 1
+    try:
+        while True:
+            jpeg = _vcam.get_preview_jpeg()
+            if jpeg:
+                await resp.write(
+                    b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: '
+                    + str(len(jpeg)).encode() + b'\r\n\r\n' + jpeg + b'\r\n'
+                )
+            await asyncio.sleep(1.0 / VCam.PREVIEW_FPS)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        pass  # client disconnesso o connessione caduta: fine dello streaming
+    finally:
+        _vcam.preview_viewers -= 1
+    return resp
 
 
 async def route_health(request: web.Request) -> web.Response:
@@ -393,8 +497,9 @@ async def route_hostinfo(request: web.Request) -> web.Response:
         'connected': _connected,
         'uptime': round(uptime),
         'cam': _vcam.status(),
-        'net': {'mbps': round(_net_mbps, 2)},
+        'net': _net_stats,
         'battery': _battery,
+        'quality': _phone_quality,
     })
 
 
@@ -650,6 +755,7 @@ def _build_app() -> web.Application:
     r.add_get('/qr.svg',               route_qr)
     r.add_get('/health',               route_health)
     r.add_get('/hostinfo',             route_hostinfo)
+    r.add_get('/preview.mjpg',         route_preview)
     r.add_post('/offer',               route_offer)
     r.add_post('/control',             route_control)
     r.add_post('/battery',             route_battery)

@@ -354,6 +354,13 @@ function boostBitrateSDP(sdp, kbps) {
   return out.join('\r\n');
 }
 
+function _reportQuality() {
+  fetch('/control', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ quality }),
+  }).catch(() => {});
+}
+
 async function applyBitrate() {
   try {
     const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
@@ -364,6 +371,7 @@ async function applyBitrate() {
     p.degradationPreference       = 'balanced';
     await sender.setParameters(p);
   } catch (e) {}
+  _reportQuality();
 }
 
 function _trackAlive() {

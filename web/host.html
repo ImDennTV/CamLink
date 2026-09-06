@@ -14,31 +14,45 @@
     <div class="logo">
       <svg viewBox="0 0 24 24" class="icon"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
     </div>
-    <div>
+    <div class="headTitle">
       <h1>CamLink</h1>
       <p class="sub">Il telefono come webcam</p>
     </div>
+    <span id="statusBadge" class="badge waiting">
+      <span class="dot"></span>
+      <span id="statusText">In attesa</span>
+    </span>
   </header>
 
-  <section class="qrwrap">
-    <div class="qrbox"><img id="qr" src="/qr.svg" alt="QR"></div>
-    <div class="qrside">
-      <p class="step-label">1 · Inquadra il QR col telefono</p>
-      <p class="muted">oppure apri questo indirizzo nel browser del telefono (stessa rete WiFi):</p>
-      <button id="url" class="urlchip" title="Copia">…</button>
-      <p class="step-label" style="margin-top:14px">2 · Tocca <b>Avvia</b></p>
-      <p class="muted">alla prima apertura accetta l'avviso del certificato: “Avanzate” → “Procedi”.</p>
+  <section class="mainRow">
+    <div class="visualBox">
+      <img id="qr" class="visual" src="/qr.svg" alt="QR code">
+      <img id="preview" class="visual" hidden alt="Anteprima live">
+      <span id="visualTag" class="visual-tag" hidden>LIVE</span>
+    </div>
+
+    <div class="mainSide">
+      <div id="idleInfo">
+        <p class="step-label">1 · Inquadra il QR col telefono</p>
+        <p class="muted">oppure apri questo indirizzo nel browser del telefono (stessa rete WiFi):</p>
+        <button id="url" class="urlchip" title="Copia">…</button>
+        <p class="step-label" style="margin-top:14px">2 · Tocca <b>Avvia</b></p>
+        <p class="muted">alla prima apertura accetta l'avviso del certificato: "Avanzate" → "Procedi".</p>
+      </div>
+      <div id="connectedInfo" hidden>
+        <p class="res-line" id="resLine">—</p>
+        <p class="muted" id="codecLine"></p>
+        <p class="muted" id="uptimeLine"></p>
+      </div>
     </div>
   </section>
 
-  <section id="statusRow" class="status waiting">
-    <span class="dot"></span>
-    <span id="statusText">In attesa del telefono…</span>
-    <span id="battInfo" class="batt" hidden>
-      <svg viewBox="0 0 24 24" class="icon batt-icon"><rect x="1" y="6" width="19" height="12" rx="2.5"/><line x1="23" y1="10" x2="23" y2="14"/></svg>
-      <span id="battPct"></span>
-    </span>
-    <span id="statusMeta" class="meta"></span>
+  <section id="statTiles" class="tiles" hidden>
+    <div class="tile"><span class="tile-val" id="tFps">–</span><span class="tile-label">fps</span></div>
+    <div class="tile"><span class="tile-val" id="tMbps">–</span><span class="tile-label">Mbps</span></div>
+    <div class="tile"><span class="tile-val" id="tLoss">–</span><span class="tile-label">perdita</span></div>
+    <div class="tile"><span class="tile-val" id="tJitter">–</span><span class="tile-label">jitter</span></div>
+    <div class="tile" id="tileBatt" hidden><span class="tile-val" id="tBatt">–</span><span class="tile-label">batteria</span></div>
   </section>
 
   <section id="graphWrap" class="graphwrap" hidden>
@@ -53,7 +67,7 @@
     <svg viewBox="0 0 24 24" class="icon"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
     <div>
       <b>Virtual Camera non attiva.</b>
-      <span>Apri OBS → <i>Strumenti → Avvia Virtual Camera</i>. Poi seleziona “OBS Virtual Camera” in Discord/Zoom/Meet.</span>
+      <span>Apri OBS → <i>Strumenti → Avvia Virtual Camera</i>. Poi seleziona "OBS Virtual Camera" in Discord/Zoom/Meet.</span>
     </div>
   </section>
 
