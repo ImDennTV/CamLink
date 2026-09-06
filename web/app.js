@@ -168,12 +168,21 @@ function stop() {
    fisiche insieme (es. frontale+posteriore), quindi chiedere la nuova prima
    fallisce e fa scattare il fallback a start() — che quello sì disconnette
    il WebRTC. Il costo è un frame nero per ~20ms, invisibile in pratica. */
+let _switchToken = 0;
 async function _switchTrack(constraints) {
+  const token = ++_switchToken;
   const sender = pc && pc.getSenders().find(s => s.track && s.track.kind === 'video');
   if (!sender) throw new Error('no sender');
   if (stream) stream.getTracks().forEach(t => t.stop());
 
   const newStream = await navigator.mediaDevices.getUserMedia({ video: constraints, audio: false });
+  // Se nel frattempo è partito un altro switch (tap doppio/rapido su
+  // flip/qualità/camera), questo è ormai superato: si scarta per non
+  // rischiare di applicare le due richieste fuori ordine.
+  if (token !== _switchToken) {
+    newStream.getTracks().forEach(t => t.stop());
+    throw new Error('superseded');
+  }
   const newTrack = newStream.getVideoTracks()[0];
   try { newTrack.contentHint = 'motion'; } catch (e) {}
   newTrack.addEventListener('ended', () => {
@@ -182,6 +191,7 @@ async function _switchTrack(constraints) {
   stream = newStream;
   $('v').srcObject = stream;
   await sender.replaceTrack(newTrack);
+  _frozenTicks = 0; // grazia al watchdog: il breve stallo dello switch non è un freeze reale
   setupCapabilities(newTrack);
   return newTrack;
 }
@@ -372,12 +382,18 @@ async function connect() {
   if (pc) pc.close();
   setPill('Connessione…', '');
 
-  pc = new RTCPeerConnection({ iceServers: [], iceCandidatePoolSize: 2 });
-  stream.getTracks().forEach(t => pc.addTrack(t, stream));
-  preferH264(pc);
+  // Si cattura l'istanza specifica (myPc) invece di leggere solo la variabile
+  // esterna `pc` dentro l'handler: se questa connessione viene chiusa e
+  // sostituita da un'altra, un evento tardivo di QUESTA non deve agire sullo
+  // stato di quella nuova — altrimenti si rischia di leggere/toccare la
+  // connessione sbagliata durante una riconnessione rapida.
+  const myPc = pc = new RTCPeerConnection({ iceServers: [], iceCandidatePoolSize: 2 });
+  stream.getTracks().forEach(t => myPc.addTrack(t, stream));
+  preferH264(myPc);
 
-  pc.onconnectionstatechange = () => {
-    const st = pc.connectionState;
+  myPc.onconnectionstatechange = () => {
+    if (pc !== myPc) return;
+    const st = myPc.connectionState;
     if (st === 'connected') {
       setPill('Live', 'good');
       ctaSpinner(false);
@@ -389,23 +405,25 @@ async function connect() {
     }
   };
 
-  const offer = await pc.createOffer();
+  const offer = await myPc.createOffer();
   offer.sdp = boostBitrateSDP(offer.sdp, BITRATE_KBPS);
-  await pc.setLocalDescription(offer);
+  await myPc.setLocalDescription(offer);
 
   let r;
   try {
     r = await fetch('/offer', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sdp: pc.localDescription.sdp, type: 'offer' }),
+      body: JSON.stringify({ sdp: myPc.localDescription.sdp, type: 'offer' }),
     });
   } catch (e) {
+    if (pc !== myPc) return;
     setPill('Errore di rete', 'bad');
     retryT = setTimeout(_smartReconnect, 2000);
     return;
   }
+  if (pc !== myPc) return;
   if (!r.ok) { setPill('Errore server', 'bad'); return; }
-  await pc.setRemoteDescription(await r.json());
+  await myPc.setRemoteDescription(await r.json());
   await applyBitrate();
 }
 

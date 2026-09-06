@@ -34,7 +34,7 @@ from aiortc import RTCPeerConnection, RTCSessionDescription
 
 # ── Configurazione ────────────────────────────────────────────────────────────
 
-VERSION      = "1.0.9"
+VERSION      = "1.1.0"
 GITHUB_REPO  = "ImDennTV/CamLink"
 
 HTTPS_PORT   = 8443          # porta per il telefono (richiede HTTPS per la camera)
@@ -93,6 +93,20 @@ def make_cert(ips: list[str]) -> None:
         serialization.NoEncryption(),
     ))
     print('[ssl] Certificato generato')
+
+
+def _cert_covers_ips(ips: list[str]) -> bool:
+    """Il router puo' riassegnare un IP diverso al PC (DHCP): se il certificato
+    esistente non lo copre, meglio rigenerarlo subito invece di lasciare che il
+    telefono trovi un avviso di certificato per un IP che non c'entra niente."""
+    try:
+        from cryptography import x509
+        cert = x509.load_pem_x509_certificate(CERT.read_bytes())
+        san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        covered = {str(ip) for ip in san.get_values_for_type(x509.IPAddress)}
+        return all(ip in covered for ip in ips)
+    except Exception:
+        return False
 
 
 # ── Virtual camera ────────────────────────────────────────────────────────────
@@ -180,8 +194,23 @@ class VCam:
                 return
 
         if frame.width != self._w or frame.height != self._h:
-            frame = frame.reformat(width=self._w, height=self._h)
-        arr = frame.to_ndarray(format='bgr24')
+            # Il telefono puo' cambiare risoluzione a caldo (cambio camera/qualita'):
+            # la webcam virtuale mantiene sempre le dimensioni originali (Discord/Zoom
+            # non gestiscono bene un cambio di risoluzione a runtime), quindi il nuovo
+            # frame viene scalato mantenendo le proporzioni e centrato su sfondo nero
+            # invece di stirarlo — altrimenti un aspect ratio diverso (es. sensore
+            # della fotocamera frontale) distorce visibilmente l'immagine.
+            import numpy as np
+            scale = min(self._w / frame.width, self._h / frame.height)
+            new_w = min(self._w, max(1, round(frame.width * scale)))
+            new_h = min(self._h, max(1, round(frame.height * scale)))
+            small = frame.reformat(width=new_w, height=new_h).to_ndarray(format='bgr24')
+            arr = np.zeros((self._h, self._w, 3), dtype=np.uint8)
+            y0 = (self._h - new_h) // 2
+            x0 = (self._w - new_w) // 2
+            arr[y0:y0 + new_h, x0:x0 + new_w] = small
+        else:
+            arr = frame.to_ndarray(format='bgr24')
         if self._mirror:
             arr = arr[:, ::-1].copy()
         self._cam.send(arr)
@@ -637,10 +666,11 @@ async def _on_shutdown(_app: web.Application) -> None:
 
 async def _serve(ready: threading.Event | None = None) -> None:
     ip = _primary_ip()
+    local_ips = _local_ips()
 
-    if not CERT.exists() or not KEY.exists():
+    if not CERT.exists() or not KEY.exists() or not _cert_covers_ips(local_ips):
         print('[ssl] Generazione certificato...')
-        make_cert(_local_ips())
+        make_cert(local_ips)
 
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(CERT, KEY)
