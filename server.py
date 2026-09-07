@@ -34,7 +34,7 @@ from aiortc import RTCPeerConnection, RTCSessionDescription
 
 # ── Configurazione ────────────────────────────────────────────────────────────
 
-VERSION      = "1.2.0"
+VERSION      = "1.2.1"
 GITHUB_REPO  = "ImDennTV/CamLink"
 
 HTTPS_PORT   = 8443          # porta per il telefono (richiede HTTPS per la camera)
@@ -297,7 +297,14 @@ async def _poll_net_stats(pc: RTCPeerConnection) -> None:
     espone solo packetsReceived/packetsLost/jitter e NON bytesReceived (si
     ferma a RTCReceivedRtpStreamStats). Usarlo lo' avrebbe fatto fallire ad ogni
     giro con AttributeError, lasciando il grafico Mbps fermo a zero in
-    silenzio — bug presente (e mai notato) fin dalla v1.0.7."""
+    silenzio — bug presente (e mai notato) fin dalla v1.0.7.
+
+    Il jitter di aiortc (StreamStatistics.jitter in rtcrtpreceiver.py) e'
+    espresso in tick RTP al clock rate del codec, non in secondi: per H264
+    (e video in generale su WebRTC) il clock rate e' sempre 90000 Hz per
+    convenzione RFC, quindi si divide per 90 per ottenere i millisecondi
+    reali. Moltiplicare per 1000 (pensando fosse gia' in secondi) dava numeri
+    assurdi (migliaia di "millisecondi")."""
     global _net_stats
     last_bytes = None
     last_ts = None
@@ -313,7 +320,7 @@ async def _poll_net_stats(pc: RTCPeerConnection) -> None:
                 if getattr(s, 'type', '') == 'inbound-rtp' and getattr(s, 'kind', '') == 'video':
                     packets_lost = getattr(s, 'packetsLost', 0) or 0
                     packets_received = getattr(s, 'packetsReceived', 0) or 0
-                    jitter_ms = (getattr(s, 'jitter', 0) or 0) * 1000
+                    jitter_ms = (getattr(s, 'jitter', 0) or 0) / 90.0
                     break
 
             mbps = _net_stats['mbps']
