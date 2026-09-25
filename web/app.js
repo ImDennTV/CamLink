@@ -4,14 +4,47 @@
 const $ = id => document.getElementById(id);
 const haptic = (ms = 8) => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
 
-const BITRATE_KBPS = 5000;
+// 10 Mbps: e' solo il TETTO MASSIMO, non un minimo imposto a tutti. Chi ha
+// rete/telefono più deboli non ne risente in nessun modo: il controllo di
+// congestione di WebRTC e la qualità automatica (sotto) restano invariati e
+// usano molto meno se serve — questo numero conta solo per chi ha margine
+// reale per sfruttarlo (fibra con upload alto + encoder hardware capace).
+const BITRATE_KBPS = 10000;
 const QUALITY = {
+  '1080p60': { w: 1920, h: 1080, fps: 60 },
   '1080p30': { w: 1920, h: 1080, fps: 30 },
   '720p60':  { w: 1280, h: 720,  fps: 60 },
   '720p30':  { w: 1280, h: 720,  fps: 30 },
 };
 // Ordine per la qualità automatica: dal più esigente in banda al più leggero.
-const QUALITY_ORDER = ['1080p30', '720p60', '720p30'];
+const QUALITY_ORDER = ['1080p60', '1080p30', '720p60', '720p30'];
+
+/* Stima il preset di partenza migliore per QUESTO dispositivo/rete, invece di
+   partire sempre dallo stesso valore fisso per tutti. Usa la Network
+   Information API (solo Chrome/Android — su iOS/Safari non esiste, si
+   ricade sul default prudente). Si applica SOLO al primissimo avvio: se
+   l'utente ha già una preferenza salvata (scelta a mano o già auto-adattata),
+   quella vince sempre.
+
+   Limite noto: `downlink` e' una stima del DOWNLOAD, non dell'upload che ci
+   serve davvero (e' il telefono a inviare). Su linee molto asimmetriche
+   (download veloce, upload lento) puo' sovrastimare. Non e' un problema
+   reale: e' solo il PRIMO tentativo — se sbaglia, la qualità automatica
+   scende da sola entro ~8 secondi in base agli fps reali, indipendentemente
+   dal perché fossero bassi. */
+function _guessInitialQuality() {
+  try {
+    const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    if (conn && typeof conn.downlink === 'number') {
+      // downlink e' una stima spesso ottimistica: margine ampio apposta.
+      if (conn.downlink >= 8) return '1080p60';
+      if (conn.downlink >= 4) return '1080p30';
+      if (conn.downlink >= 2) return '720p60';
+      return '720p30';
+    }
+  } catch (e) {}
+  return '720p60';
+}
 
 /* ── Impostazioni persistenti (sopravvivono a riavvii/refresh) ───────────── */
 const SETTINGS_KEY = 'camlink.settings';
@@ -27,7 +60,7 @@ const _saved = loadSettings();
 
 let pc, stream, retryT, statsTimer, wakeLock, _wakeLockTimer;
 let facing      = _saved.facing      ?? 'environment';
-let quality     = _saved.quality     ?? '720p60';
+let quality     = _saved.quality     ?? _guessInitialQuality();
 let mirror      = _saved.mirror      ?? false;
 let statsOn     = _saved.statsOn     ?? true;
 let autoQuality = _saved.autoQuality ?? true;

@@ -161,8 +161,8 @@ body.streaming #dock { opacity: 1; pointer-events: auto; transform: translateX(-
 
 .seg { display: flex; gap: 4px; background: #232430; border-radius: 13px; padding: 4px; margin-bottom: 22px }
 .seg button {
-  flex: 1; padding: 11px 6px; border-radius: 10px; font-size: 14px; font-weight: 550;
-  color: var(--dim); transition: background .2s, color .2s;
+  flex: 1; padding: 11px 3px; border-radius: 10px; font-size: 13px; font-weight: 550;
+  color: var(--dim); transition: background .2s, color .2s; white-space: nowrap;
 }
 .seg button.active { background: var(--grad); color: #fff }
 
